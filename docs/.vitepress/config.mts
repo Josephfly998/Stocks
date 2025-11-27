@@ -1,29 +1,47 @@
 import { defineConfig } from 'vitepress'
+import fs from 'fs'
+import path from 'path'
 
-// https://vitepress.dev/reference/site-config
+// 自动生成 summaries 列表
+function getSummariesSidebar() {
+  const summariesDir = path.resolve(__dirname, '../summaries')
+  const files = fs.readdirSync(summariesDir)
+
+  // 过滤并按时间倒序排序
+  const mdFiles = files
+    .filter(f => f.endsWith('.md') && f !== '_sidebar.md')
+    .sort((a, b) => b.localeCompare(a))  // 日期倒序
+
+  return mdFiles.map(file => ({
+    text: file.replace('.md', ''),
+    link: `/summaries/${file}`,
+  }))
+}
+
 export default defineConfig({
   title: "Stocks Summaries",
-  description: "A VitePress Site for Stocks Summaries. ",
-  base: '/Stocks/',
+  description: "A VitePress Site for Stocks Summaries.",
+  base: '/Stocks/',  // GitHub Pages 项目必须加
+
   themeConfig: {
-    // https://vitepress.dev/reference/default-theme-config
     nav: [
-      { text: 'Home', link: '/' },
-      { text: 'Examples', link: '/markdown-examples' }
+      { text: '首页', link: '/' },
+      { text: '历史总结', link: '/summaries/' }
     ],
 
-    sidebar: [
-      {
-        text: 'Examples',
-        items: [
-          { text: 'Markdown Examples', link: '/markdown-examples' },
-          { text: 'Runtime API Examples', link: '/api-examples' }
-        ]
-      }
-    ],
+    // 🔥 侧边栏：只有 summaries 才需要
+    sidebar: {
+      '/summaries/': [
+        {
+          text: '历史总结',
+          items: getSummariesSidebar()
+        }
+      ]
+      // 首页 / 不需要 sidebar，因此不写 '/'
+    },
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/vuejs/vitepress' }
+      { icon: 'github', link: 'https://github.com/andychenggg/Stocks' }
     ]
   }
 })
