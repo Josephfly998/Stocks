@@ -21,7 +21,7 @@ function getSummariesSidebar() {
 export default defineConfig({
   title: "Stocks Summaries",
   description: "A VitePress Site for Stocks Summaries.",
-  base: '/Stocks/',  // GitHub Pages 项目必须加
+  base: './',
 
   themeConfig: {
     nav: [
