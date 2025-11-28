@@ -60,5 +60,5 @@ def save_to_md(
 
     datetime_str = now_pst.strftime("%Y-%m-%d %H:%M:%S")
     with open(f'{summary_dir}/{datetime_str}.md', 'w', encoding='utf-8') as f:
-        f.write(f"# {now_cst.strftime('%Y-%m-%d %H:%M:%S CST')} 总结\n\n> 美西时间：{now_pst.strftime('%Y-%m-%d %H:%M:%S PST')}\n\n> 美东时间：{now_est.strftime('%Y-%m-%d %H:%M:%S EST')}\n\n{summary}")
+        f.write(f"# {now_cst.strftime('%Y-%m-%d %H:%M:%S CST')} 总结 - {description}\n\n> 美西时间：{now_pst.strftime('%Y-%m-%d %H:%M:%S PST')}\n\n> 美东时间：{now_est.strftime('%Y-%m-%d %H:%M:%S EST')}\n\n{summary}")
 
