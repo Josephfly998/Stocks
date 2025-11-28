@@ -23,6 +23,7 @@ def get_response(to_summary_text: str, model: str = "gemini-2.5-pro") -> str:
 
 def save_to_md(
     summary: str,
+    description: str,
     model: str,
     output_dir: str = "docs",
 ) -> str:
@@ -35,7 +36,7 @@ def save_to_md(
     now_pst = now_utc.astimezone(pytz.timezone('America/Los_Angeles'))  # 美西时间
     now_est = now_utc.astimezone(pytz.timezone('America/New_York'))     # 美东时间
     now_cst = now_utc.astimezone(pytz.timezone('Asia/Shanghai'))        # 北京时间
-    readme_content = f"""# 财经社区聊天记录总结
+    readme_content = f"""# 财经聊天总结 - {description}
 
     > 北京时间：{now_cst.strftime("%Y-%m-%d %H:%M:%S CST")}
 

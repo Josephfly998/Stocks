@@ -3,7 +3,7 @@ import pytz
 import os
 from loguru import logger
 from utils import history_list_to_text, summary_prompt, get_response, get_history_posts, save_to_md, get_summary_config, hours_from_open, hours_from_close
-def summary_run(summary_limit: int = 300, is_whole_day: bool = False):
+def summary_run(summary_limit: int = 300, is_whole_day: bool = False, description: str = ""):
     """
     生成并保存总结
     
@@ -19,6 +19,7 @@ def summary_run(summary_limit: int = 300, is_whole_day: bool = False):
 
     save_to_md(
         summary=summary,
+        description=description,
         model=model,
         output_dir="docs",
     )
@@ -37,7 +38,7 @@ if __name__ == "__main__":
     if 0 <= hours_close < 1:
         # 收盘总结
         pass
-    elif -2 <= hours_open < 7:
+    elif -1 <= hours_open < 7:
         # 盘前/盘中总结
         pass
     else:
@@ -48,4 +49,4 @@ if __name__ == "__main__":
             exit(0)
     
     limit, is_whole_day, description = get_summary_config()
-    summary_run(summary_limit=limit, is_whole_day=is_whole_day)
+    summary_run(summary_limit=limit, is_whole_day=is_whole_day, description=description)

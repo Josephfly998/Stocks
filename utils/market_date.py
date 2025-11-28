@@ -106,9 +106,9 @@ def get_summary_config() -> Tuple[int, bool, str]:
         return 800, True, "收盘总结（过去24小时）"
     
     # 场景2：盘前2小时 + 开盘期间
-    if -2 <= hours_open < 7:
+    if -1 <= hours_open < 7:
         if hours_open < 0:
-            return 200, False, f"盘前总结（开盘前 {abs(hours_open)} 小时）"
+            return 300, False, f"盘前总结（开盘前 {abs(hours_open)} 小时）"
         else:
             return 200, False, f"盘中总结（开盘后 {hours_open} 小时）"
     
