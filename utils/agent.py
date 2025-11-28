@@ -42,7 +42,10 @@ def save_to_md(
     > 美西时间：{now_pst.strftime("%Y-%m-%d %H:%M:%S PST")}
 
     > 美东时间：{now_est.strftime("%Y-%m-%d %H:%M:%S EST")}
+
     > 模型：{model}
+
+    > 代码仓库：[GitHub - finance-community-summary](https://github.com/andychenggg/Stocks) 希望各位多多 star ⭐️，谢谢支持！有问题欢迎提 issue。
 
     {summary}
 
