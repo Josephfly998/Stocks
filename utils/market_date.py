@@ -103,20 +103,20 @@ def get_summary_config() -> Tuple[int, bool, str]:
     
     # 场景3：收盘后立即总结（收盘后0-1小时内）
     if 0 <= hours_close < 1:
-        return 800, True, "收盘总结（过去24小时）"
+        return 1000, True, "全天回顾", "收盘总结（过去24小时）"
     
     # 场景2：盘前2小时 + 开盘期间
     if -1 <= hours_open < 7:
         if hours_open < 0:
-            return 300, False, f"盘前总结（开盘前 {abs(hours_open)} 小时）"
-        elif hours_open < 2:
-            return 100, False, f"盘中总结（开盘后 {hours_open} 小时）"
-        elif hours_open < 5:
-            return 200, False, f"盘中总结（开盘后 {hours_open} 小时）"
+            return 1000, True, "盘前全天提要", f"盘前总结（开盘前 {abs(hours_open)} 小时）"
+        elif hours_open == 1:
+            return 200, False, "开盘提要", f"盘中总结（开盘后 {hours_open} 小时）"
+        elif hours_open == 3:
+            return 200, False, "盘中总结", f"盘中总结（开盘后 {hours_open} 小时）"
         else:
-            return 300, False, f"盘中总结（开盘后 {hours_open} 小时）"
+            return 300, False, "盘中小时总结",f"盘中总结（开盘后 {hours_open} 小时）"
     # 场景1：休市/周末
-    return 200, False, "休市总结（非交易时段）"
+    return 200, False, "休市总结", "休市总结（非交易时段）"
 
 
 if __name__ == "__main__":
