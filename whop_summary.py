@@ -12,7 +12,7 @@ def summary_run():
         is_whole_day: 是否只获取过去24小时的消息
     """
     limit, is_whole_day, title, description = get_summary_config()
-    limit, is_whole_day, title, description = 1000, True, "盘前全天总结", "盘前总结（过去24小时）"
+    # limit, is_whole_day, title, description = 1000, True, "盘前全天总结", "盘前总结（过去24小时）"
     history_items, username_dict = get_history_posts(limit, is_whole_day=is_whole_day)
     big_text = history_list_to_text(history_items, username_dict)
     to_summary_text = summary_prompt + big_text

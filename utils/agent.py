@@ -25,7 +25,7 @@ def save_to_md(
     summary: str,
     description: str,
     model: str,
-    file_name: Optional[str] = None,
+    title: Optional[str] = None,
     output_dir: str = "docs",
 ) -> str:
     # 获取当前时间
@@ -60,9 +60,9 @@ def save_to_md(
         f.write(readme_content)
 
     datetime_str = now_cst.strftime("%Y-%m-%d %H:%M:%S")
-    if file_name:
+    if title is None:
         with open(f'{summary_dir}/{datetime_str}.md', 'w', encoding='utf-8') as f:
             f.write(f"# {now_cst.strftime('%Y-%m-%d %H:%M:%S CST')} 总结 - {description}\n\n> 美西时间：{now_pst.strftime('%Y-%m-%d %H:%M:%S PST')}\n\n> 美东时间：{now_est.strftime('%Y-%m-%d %H:%M:%S EST')}\n\n{summary}")
     else:
-        with open(f'{summary_dir}/{datetime_str}-{file_name}.md', 'w', encoding='utf-8') as f:
+        with open(f'{summary_dir}/{datetime_str}-{title}.md', 'w', encoding='utf-8') as f:
             f.write(f"# {now_cst.strftime('%Y-%m-%d %H:%M:%S CST')} 总结 - {description}\n\n> 美西时间：{now_pst.strftime('%Y-%m-%d %H:%M:%S PST')}\n\n> 美东时间：{now_est.strftime('%Y-%m-%d %H:%M:%S EST')}\n\n{summary}")
