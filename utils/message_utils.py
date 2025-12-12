@@ -34,8 +34,9 @@ def _load_posts_cache() -> Dict[str, Dict[str, Any]]:
     return posts
 def _save_posts_cache(posts: Dict[str, Dict[str, Any]]) -> None:
     """整体写回帖子缓存（简单粗暴一点，量不大没关系）"""
+    posts = sorted(posts.values(), key=lambda p: p.get('createdAt', 0), reverse=True)
     with open(POSTS_CACHE_PATH, 'w', encoding='utf-8') as f:
-        for post in posts.values():
+        for post in posts:
             f.write(json.dumps(post, ensure_ascii=False) + '\n')
             
 def _load_users_cache() -> Dict[str, str]:
