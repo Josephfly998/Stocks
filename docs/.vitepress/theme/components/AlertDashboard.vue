@@ -299,16 +299,25 @@ function badge(type: string) {
 }
 
 function buildWsUrl() {
+  // 1) Highest priority: complete URL override (e.g., wss://example.com/alerts)
+  const overrideUrl =
+    (window as any).__ALERT_WS_URL ||
+    (import.meta as any).env?.VITE_ALERT_WS_URL
+  if (overrideUrl) return overrideUrl as string
+
+  // 2) Otherwise build from scheme + host + port
   const loc = window.location
-  const isHttps = loc.protocol === 'https:'
-  const wsScheme = isHttps ? 'wss' : 'ws'
-  const injectedHost =
-    // runtime override, e.g. window.__ALERT_WS_HOST = '10.0.0.5'
+  const wsScheme = loc.protocol === 'https:' ? 'wss' : 'ws'
+  const host =
     (window as any).__ALERT_WS_HOST ||
-    // build-time env, e.g. VITE_ALERT_WS_HOST=10.0.0.5
-    (import.meta as any).env?.VITE_ALERT_WS_HOST
-  const host = injectedHost || loc.hostname || 'localhost'
-  return `${wsScheme}://${host}:${CLIENT_PORT}`
+    (import.meta as any).env?.VITE_ALERT_WS_HOST ||
+    loc.hostname ||
+    'localhost'
+  const port =
+    (window as any).__ALERT_WS_PORT ||
+    (import.meta as any).env?.VITE_ALERT_WS_PORT ||
+    CLIENT_PORT
+  return `${wsScheme}://${host}:${port}`
 }
 
 const CLIENT_PORT = 8765
