@@ -306,14 +306,16 @@ function buildWsUrl() {
   if (overrideUrl) return overrideUrl as string
 
 
+
   // 2) Otherwise build from scheme + host + port
   const loc = window.location
   const wsScheme = loc.protocol === 'https:' ? 'wss' : 'ws'
-  const host =
-    (window as any).__ALERT_WS_HOST ||
-    (import.meta as any).env?.VITE_ALERT_WS_HOST ||
-    loc.hostname ||
-    'localhost'
+//   const host =
+//     (window as any).__ALERT_WS_HOST ||
+//     (import.meta as any).env?.VITE_ALERT_WS_HOST ||
+//     loc.hostname ||
+//     'localhost'
+    const host = 'localhost';
   const port =
     (window as any).__ALERT_WS_PORT ||
     (import.meta as any).env?.VITE_ALERT_WS_PORT ||
