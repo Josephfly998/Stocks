@@ -299,9 +299,7 @@ function badge(type: string) {
 }
 
 function buildWsUrl() {
-  const loc = window.location
-  const wsScheme = loc.protocol === 'https:' ? 'wss' : 'ws'
-  return `${wsScheme}://${loc.host}/ws`
+  return `wss://ws.flowbyte.me`
 }
 
 
