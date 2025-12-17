@@ -45,7 +45,10 @@
             {{ a.symbol }} · {{ a.magnitude * 100 }}% · {{ a.window_minutes }}m
           </div>
           <div class="meta">
-            {{ fmtTs(a.ts) }} | O {{ formatPrice(a.reference.open) }} · C {{ formatPrice(a.reference.close) }} · L {{ formatPrice(a.reference.low) }} · H {{ formatPrice(a.reference.high) }}
+            高点 {{ fmtTs(peakTs(a)) }} · {{ formatPrice(peakPrice(a)) }} | 触发 {{ fmtTs(triggerTs(a)) }} · {{ formatPrice(triggerPrice(a)) }}
+          </div>
+          <div class="meta">
+            开盘 {{ formatPrice(a.reference.open) }} · 高点→触发跌幅 {{ pctOrDash(dropFromPeak(a)) }}（阈值 {{ (a.magnitude * 100).toFixed(1) }}%）
           </div>
         </div>
       </div>
@@ -301,6 +304,31 @@ function badge(type: string) {
   if (type === 'rapid_drop') return '极速下跌'
   if (type === 'rapid_rebound') return '极速反弹'
   return type
+}
+
+function peakPrice(a: any) {
+  return a?.reference?.peak_price ?? a?.reference?.high ?? null
+}
+
+function triggerPrice(a: any) {
+  return a?.reference?.current_price ?? a?.reference?.close ?? null
+}
+
+function peakTs(a: any) {
+  return a?.reference?.peak_ts ?? a?.ts ?? null
+}
+
+function triggerTs(a: any) {
+  return a?.reference?.current_ts ?? a?.ts ?? null
+}
+
+function dropFromPeak(a: any) {
+  return a?.reference?.drop_from_peak ?? null
+}
+
+function pctOrDash(v: number | null | undefined) {
+  if (v === null || v === undefined) return '--'
+  return formatPct(v)
 }
 
 function buildWsUrl() {
