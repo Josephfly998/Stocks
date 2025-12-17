@@ -138,7 +138,13 @@ class SQLiteStore:
                 reference_high REAL NOT NULL,
                 reference_peak_ts INTEGER,
                 reference_current_ts INTEGER,
-                drop_from_peak REAL
+                drop_from_peak REAL,
+                anchor_type TEXT,
+                anchor_price REAL,
+                anchor_ts INTEGER,
+                anchor_pct_from_open REAL,
+                current_pct_from_open REAL,
+                move_from_anchor REAL
             );
             """
         )
@@ -183,11 +189,17 @@ class SQLiteStore:
         reference_peak_ts: Optional[int],
         reference_current_ts: Optional[int],
         drop_from_peak: Optional[float],
+        anchor_type: str,
+        anchor_price: float,
+        anchor_ts: int,
+        anchor_pct_from_open: float,
+        current_pct_from_open: float,
+        move_from_anchor: float,
     ) -> None:
         await self._execute(
             """
-            INSERT INTO alerts(symbol, alert_type, magnitude, ts, reference_open, reference_close, reference_low, reference_high, reference_peak_ts, reference_current_ts, drop_from_peak)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            INSERT INTO alerts(symbol, alert_type, magnitude, ts, reference_open, reference_close, reference_low, reference_high, reference_peak_ts, reference_current_ts, drop_from_peak, anchor_type, anchor_price, anchor_ts, anchor_pct_from_open, current_pct_from_open, move_from_anchor)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
                 symbol,
@@ -201,6 +213,12 @@ class SQLiteStore:
                 reference_peak_ts,
                 reference_current_ts,
                 drop_from_peak,
+                anchor_type,
+                anchor_price,
+                anchor_ts,
+                anchor_pct_from_open,
+                current_pct_from_open,
+                move_from_anchor,
             ),
         )
 
@@ -225,7 +243,23 @@ class SQLiteStore:
                 reference_peak_ts,
                 reference_current_ts,
                 drop_from_peak,
+                anchor_type,
+                anchor_price,
+                anchor_ts,
+                anchor_pct_from_open,
+                current_pct_from_open,
+                move_from_anchor,
             ) = r
+            anchor_type = anchor_type or ("peak" if alert_type == "rapid_drop" else "trough")
+            anchor_price = anchor_price or (reference_high if alert_type == "rapid_drop" else reference_low)
+            anchor_ts = anchor_ts or reference_peak_ts or ts
+            move_from_anchor = move_from_anchor or drop_from_peak
+            anchor_pct = anchor_pct_from_open
+            current_pct = current_pct_from_open
+            if anchor_pct is None and reference_open:
+                anchor_pct = (anchor_price - reference_open) / reference_open
+            if current_pct is None and reference_open:
+                current_pct = (reference_close - reference_open) / reference_open
             alerts.append(
                 {
                     "type": "alert",
@@ -244,6 +278,12 @@ class SQLiteStore:
                         "current_price": reference_close,
                         "current_ts": reference_current_ts or ts,
                         "drop_from_peak": drop_from_peak,
+                        "anchor_type": anchor_type,
+                        "anchor_price": anchor_price,
+                        "anchor_ts": anchor_ts,
+                        "anchor_pct_from_open": anchor_pct,
+                        "current_pct_from_open": current_pct,
+                        "move_from_anchor": move_from_anchor,
                     },
                 }
             )
@@ -281,6 +321,18 @@ class SQLiteStore:
             alters.append("ALTER TABLE alerts ADD COLUMN reference_current_ts INTEGER;")
         if "drop_from_peak" not in cols:
             alters.append("ALTER TABLE alerts ADD COLUMN drop_from_peak REAL;")
+        if "anchor_type" not in cols:
+            alters.append("ALTER TABLE alerts ADD COLUMN anchor_type TEXT;")
+        if "anchor_price" not in cols:
+            alters.append("ALTER TABLE alerts ADD COLUMN anchor_price REAL;")
+        if "anchor_ts" not in cols:
+            alters.append("ALTER TABLE alerts ADD COLUMN anchor_ts INTEGER;")
+        if "anchor_pct_from_open" not in cols:
+            alters.append("ALTER TABLE alerts ADD COLUMN anchor_pct_from_open REAL;")
+        if "current_pct_from_open" not in cols:
+            alters.append("ALTER TABLE alerts ADD COLUMN current_pct_from_open REAL;")
+        if "move_from_anchor" not in cols:
+            alters.append("ALTER TABLE alerts ADD COLUMN move_from_anchor REAL;")
         for stmt in alters:
             cur.execute(stmt)
         conn.commit()
@@ -292,7 +344,7 @@ class SQLiteStore:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT symbol, alert_type, magnitude, ts, reference_open, reference_close, reference_low, reference_high, reference_peak_ts, reference_current_ts, drop_from_peak
+            SELECT symbol, alert_type, magnitude, ts, reference_open, reference_close, reference_low, reference_high, reference_peak_ts, reference_current_ts, drop_from_peak, anchor_type, anchor_price, anchor_ts, anchor_pct_from_open, current_pct_from_open, move_from_anchor
             FROM alerts
             WHERE ts >= ?
             ORDER BY ts DESC
@@ -421,8 +473,10 @@ class MarketMonitor:
             return None
         latest = window[-1]
         peak = max(window, key=lambda k: k.high)
+        trough = min(window, key=lambda k: k.low)
         close_last = latest.close
         drop_from_peak = (peak.high - close_last) / open_base
+        rise_from_trough = (close_last - trough.low) / open_base
         return {
             "window_end": window[-1].close_time,
             "change_close": (close_last - open_base) / open_base,
@@ -435,9 +489,15 @@ class MarketMonitor:
             "reference_high": peak.high,
             "peak_price": peak.high,
             "peak_ts": peak.close_time,
+            "peak_pct_from_open": (peak.high - open_base) / open_base,
+            "trough_price": trough.low,
+            "trough_ts": trough.close_time,
+            "trough_pct_from_open": (trough.low - open_base) / open_base,
             "current_price": close_last,
             "current_ts": latest.close_time,
+            "current_pct_from_open": (close_last - open_base) / open_base,
             "drop_from_peak": drop_from_peak,
+            "rise_from_trough": rise_from_trough,
         }
 
     async def _check_alerts(
@@ -448,6 +508,8 @@ class MarketMonitor:
                 continue
             if stats["drop_from_peak"] >= threshold:
                 await self._emit_alert("rapid_drop", threshold, symbol, stats)
+            if stats["rise_from_trough"] >= threshold:
+                await self._emit_alert("rapid_rebound", threshold, symbol, stats)
 
     async def _emit_alert(
         self, alert_type: str, threshold: float, symbol: str, stats: dict
@@ -459,6 +521,16 @@ class MarketMonitor:
             return
         self.last_alert_at[key] = now_sec
         ts_ms = stats.get("current_ts", stats["window_end"])
+        if alert_type == "rapid_drop":
+            anchor_price = stats["peak_price"]
+            anchor_ts = stats["peak_ts"]
+            anchor_pct = stats["peak_pct_from_open"]
+            move_from_anchor = stats["drop_from_peak"]
+        else:
+            anchor_price = stats["trough_price"]
+            anchor_ts = stats["trough_ts"]
+            anchor_pct = stats["trough_pct_from_open"]
+            move_from_anchor = stats["rise_from_trough"]
         payload = {
             "type": "alert",
             "symbol": symbol.upper(),
@@ -476,6 +548,13 @@ class MarketMonitor:
                 "current_price": stats["current_price"],
                 "current_ts": stats["current_ts"],
                 "drop_from_peak": stats["drop_from_peak"],
+                "rise_from_trough": stats["rise_from_trough"],
+                "anchor_type": "peak" if alert_type == "rapid_drop" else "trough",
+                "anchor_price": anchor_price,
+                "anchor_ts": anchor_ts,
+                "anchor_pct_from_open": anchor_pct,
+                "current_pct_from_open": stats["current_pct_from_open"],
+                "move_from_anchor": move_from_anchor,
             },
         }
         await self.store.insert_alert(
@@ -490,6 +569,12 @@ class MarketMonitor:
             reference_peak_ts=stats.get("peak_ts"),
             reference_current_ts=stats.get("current_ts"),
             drop_from_peak=stats.get("drop_from_peak"),
+            anchor_type="peak" if alert_type == "rapid_drop" else "trough",
+            anchor_price=anchor_price,
+            anchor_ts=anchor_ts,
+            anchor_pct_from_open=anchor_pct,
+            current_pct_from_open=stats["current_pct_from_open"],
+            move_from_anchor=move_from_anchor,
         )
         await self.broadcaster.broadcast(payload)
         logging.info("Alert emitted: %s", payload)
