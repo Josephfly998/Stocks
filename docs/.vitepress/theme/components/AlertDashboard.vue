@@ -237,8 +237,13 @@ function baseOption(sym: string) {
   return {
     title: { text: sym, left: 'center', textStyle: { fontSize: 12 } },
     tooltip: { trigger: 'axis' },
-    grid: { left: 40, right: 10, top: 30, bottom: 30 },
-    xAxis: { type: 'category', data: [], boundaryGap: false, axisLabel: { show: false } },
+    grid: { left: 64, right: 16, top: 30, bottom: 40, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: [],
+      boundaryGap: false,
+      axisLabel: { show: true, margin: 12, hideOverlap: true }
+    },
     yAxis: { type: 'value', scale: true },
     series: [
       {
