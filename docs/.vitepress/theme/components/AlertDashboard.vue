@@ -45,7 +45,10 @@
             {{ a.symbol }} · {{ a.magnitude * 100 }}% · {{ a.window_minutes }}m
           </div>
           <div class="meta">
-            {{ fmtTs(a.ts) }} | O {{ formatPrice(a.reference.open) }} · C {{ formatPrice(a.reference.close) }} · L {{ formatPrice(a.reference.low) }} · H {{ formatPrice(a.reference.high) }}
+            高点 {{ fmtTs(peakTs(a)) }} · {{ formatPrice(peakPrice(a)) }} | 触发 {{ fmtTs(triggerTs(a)) }} · {{ formatPrice(triggerPrice(a)) }}
+          </div>
+          <div class="meta">
+            开盘 {{ formatPrice(a.reference.open) }} · 高点→触发跌幅 {{ pctOrDash(dropFromPeak(a)) }}（阈值 {{ (a.magnitude * 100).toFixed(1) }}%）
           </div>
         </div>
       </div>
@@ -199,6 +202,9 @@ function handleMessage(msg: any) {
       lastPrices[s] = payload.price ?? null
       todayOpens[s] = payload.today_open ?? null
     })
+    if (Array.isArray(msg.alerts)) {
+      hydrateAlerts(msg.alerts)
+    }
     updateCharts()
   } else if (msg.type === 'price') {
     const sym = msg.symbol
@@ -213,6 +219,17 @@ function handleMessage(msg: any) {
     })
     if (alerts.length > 50) alerts.pop()
   }
+}
+
+function hydrateAlerts(list: any[]) {
+  alerts.splice(
+    0,
+    alerts.length,
+    ...list.map((a) => ({
+      ...a,
+      id: `${a.symbol}-${a.alert_type}-${a.ts}-${a.magnitude}`
+    }))
+  )
 }
 
 function pushPoint(sym: string, ts: number, price: number) {
@@ -237,8 +254,13 @@ function baseOption(sym: string) {
   return {
     title: { text: sym, left: 'center', textStyle: { fontSize: 12 } },
     tooltip: { trigger: 'axis' },
-    grid: { left: 40, right: 10, top: 30, bottom: 30 },
-    xAxis: { type: 'category', data: [], boundaryGap: false, axisLabel: { show: false } },
+    grid: { left: 64, right: 16, top: 30, bottom: 40, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: [],
+      boundaryGap: false,
+      axisLabel: { show: true, margin: 12, hideOverlap: true }
+    },
     yAxis: { type: 'value', scale: true },
     series: [
       {
@@ -296,6 +318,31 @@ function badge(type: string) {
   if (type === 'rapid_drop') return '极速下跌'
   if (type === 'rapid_rebound') return '极速反弹'
   return type
+}
+
+function peakPrice(a: any) {
+  return a?.reference?.peak_price ?? a?.reference?.high ?? null
+}
+
+function triggerPrice(a: any) {
+  return a?.reference?.current_price ?? a?.reference?.close ?? null
+}
+
+function peakTs(a: any) {
+  return a?.reference?.peak_ts ?? a?.ts ?? null
+}
+
+function triggerTs(a: any) {
+  return a?.reference?.current_ts ?? a?.ts ?? null
+}
+
+function dropFromPeak(a: any) {
+  return a?.reference?.drop_from_peak ?? null
+}
+
+function pctOrDash(v: number | null | undefined) {
+  if (v === null || v === undefined) return '--'
+  return formatPct(v)
 }
 
 function buildWsUrl() {
