@@ -6,9 +6,19 @@
         <h1>币预警</h1>
         <p class="sub">实时价格、日内涨跌幅与极速波动提醒（BTCUSDT / ETHUSDT）。</p>
       </div>
-      <div class="connection" :class="connectionClass">
-        <span class="dot"></span>
-        <span>{{ connectionLabel }}</span>
+      <div class="hero-controls">
+        <div class="connection" :class="connectionClass">
+          <span class="dot"></span>
+          <span>{{ connectionLabel }}</span>
+        </div>
+        <div class="tz-select">
+          <label for="tz">时间</label>
+          <select id="tz" v-model="selectedTz">
+            <option v-for="tz in tzOptions" :key="tz.key" :value="tz.key">
+              {{ tz.label }}
+            </option>
+          </select>
+        </div>
       </div>
     </header>
 
@@ -26,7 +36,7 @@
           <span v-else>--</span>
         </div>
         <div class="mini">
-          今开: <strong>{{ todayOpen(sym) ?? '--' }}</strong>
+          今开 ({{ currentTzLabel }}): <strong>{{ todayOpen(sym) ?? '--' }}</strong>
         </div>
         <div class="chart" :ref="setChartRef(sym)"></div>
       </div>
@@ -57,22 +67,33 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 type PricePoint = { t: number; v: number }
 type SeriesMap = Record<string, PricePoint[]>
 
 const symbols = ['BTCUSDT', 'ETHUSDT']
 const maxPoints = 240
+const alertApiUrl = buildAlertApiUrl()
+const tzOptions = [
+  { key: 'utc', label: 'UTC+0', timeZone: 'UTC' },
+  { key: 'us_west', label: '美西 (PT)', timeZone: 'America/Los_Angeles' },
+  { key: 'us_east', label: '美东 (ET)', timeZone: 'America/New_York' },
+  { key: 'beijing', label: '北京时间', timeZone: 'Asia/Shanghai' }
+]
+const tzOptionMap = Object.fromEntries(tzOptions.map((o) => [o.key, o]))
+const selectedTz = ref<string>('utc')
 const alerts = reactive<any[]>([])
 const lastPrices = reactive<Record<string, number | null>>({
   BTCUSDT: null,
   ETHUSDT: null
 })
-const todayOpens = reactive<Record<string, number | null>>({
-  BTCUSDT: null,
-  ETHUSDT: null
-})
+const dayOpens = reactive<Record<string, Record<string, number | null>>>(
+  tzOptions.reduce((acc, tz) => {
+    acc[tz.key] = { BTCUSDT: null, ETHUSDT: null }
+    return acc
+  }, {} as Record<string, Record<string, number | null>>)
+)
 const series: SeriesMap = reactive({
   BTCUSDT: [],
   ETHUSDT: []
@@ -85,6 +106,7 @@ let ws: WebSocket | null = null
 let reconnectTimer: number | null = null
 let echartsLib: any = null
 const connectionState = ref<'connecting' | 'open' | 'closed'>('connecting')
+let refreshTimer: number | null = null
 
 symbols.forEach((sym) => {
   chartRefs[sym] = (el: HTMLElement | null) => {
@@ -94,16 +116,22 @@ symbols.forEach((sym) => {
 
 const connectionLabel = computedLabel()
 const connectionClass = computedClass()
+const currentTzLabel = computed(() => tzOptionMap[selectedTz.value]?.label ?? 'UTC+0')
 
 onMounted(async () => {
   await loadEcharts()
   initCharts()
+  fetchInitialAlerts()
   connect()
 })
 
 onBeforeUnmount(() => {
   cleanupWs()
   charts.forEach((c) => c?.dispose?.())
+})
+
+watch(selectedTz, () => {
+  updateCharts()
 })
 
 function computedLabel() {
@@ -200,7 +228,7 @@ function handleMessage(msg: any) {
     Object.entries(msg.data).forEach(([sym, payload]) => {
       const s = sym.toUpperCase()
       lastPrices[s] = payload.price ?? null
-      todayOpens[s] = payload.today_open ?? null
+      setDayOpens(s, payload.day_open, payload.today_open)
     })
     if (Array.isArray(msg.alerts)) {
       hydrateAlerts(msg.alerts)
@@ -209,15 +237,30 @@ function handleMessage(msg: any) {
   } else if (msg.type === 'price') {
     const sym = msg.symbol
     lastPrices[sym] = msg.price ?? null
-    todayOpens[sym] = msg.today_open ?? null
+    setDayOpens(sym, msg.day_open, msg.today_open)
     pushPoint(sym, msg.ts, msg.price)
     updateCharts()
   } else if (msg.type === 'alert') {
+    const id = `${msg.symbol}-${msg.alert_type}-${msg.ts}-${msg.magnitude}`
+    if (alerts.find((a) => a.id === id)) return
     alerts.unshift({
       ...msg,
-      id: `${msg.symbol}-${msg.alert_type}-${msg.ts}-${msg.magnitude}`
+      id
     })
     if (alerts.length > 50) alerts.pop()
+    scheduleRefreshOnAlert()
+  }
+}
+
+async function fetchInitialAlerts() {
+  if (!alertApiUrl) return
+  try {
+    const res = await fetch(alertApiUrl)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    if (Array.isArray(data.alerts)) hydrateAlerts(data.alerts)
+  } catch (err) {
+    console.error('Failed to fetch initial alerts', err)
   }
 }
 
@@ -230,6 +273,16 @@ function hydrateAlerts(list: any[]) {
       id: `${a.symbol}-${a.alert_type}-${a.ts}-${a.magnitude}`
     }))
   )
+}
+
+function setDayOpens(sym: string, dayOpenMap: Record<string, number> | undefined, legacyOpen: number | null) {
+  const map = dayOpenMap || { utc: legacyOpen }
+  Object.entries(map).forEach(([tz, v]) => {
+    if (!dayOpens[tz]) {
+      dayOpens[tz] = { BTCUSDT: null, ETHUSDT: null }
+    }
+    dayOpens[tz][sym] = v ?? null
+  })
 }
 
 function pushPoint(sym: string, ts: number, price: number) {
@@ -275,7 +328,7 @@ function baseOption(sym: string) {
 }
 
 function pct(sym: string) {
-  const o = todayOpens[sym]
+  const o = todayOpen(sym)
   const p = lastPrices[sym]
   if (o === null || p === null || o === 0) return null
   return (p - o) / o
@@ -286,7 +339,9 @@ function lastPrice(sym: string) {
 }
 
 function todayOpen(sym: string) {
-  return todayOpens[sym]
+  const tz = selectedTz.value
+  if (!dayOpens[tz]) return null
+  return dayOpens[tz][sym]
 }
 
 function formatPrice(v: number | null) {
@@ -301,17 +356,28 @@ function formatPct(v: number) {
 }
 
 function fmtTime(ts: number) {
-  const d = new Date(ts)
-  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
+  return formatWithTz(ts, { hour: '2-digit', minute: '2-digit' })
 }
 
 function fmtTs(ts: number) {
-  const d = new Date(ts)
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`
+  return formatWithTz(ts, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  })
 }
 
-function pad(n: number) {
-  return n.toString().padStart(2, '0')
+function formatWithTz(ts: number, opts: Intl.DateTimeFormatOptions) {
+  const tzKey = selectedTz.value
+  const tz = tzOptionMap[tzKey]?.timeZone || 'UTC'
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz,
+    ...opts,
+    hour12: false
+  }).format(new Date(ts))
 }
 
 function badge(type: string) {
@@ -345,8 +411,23 @@ function pctOrDash(v: number | null | undefined) {
   return formatPct(v)
 }
 
+function scheduleRefreshOnAlert() {
+  if (refreshTimer) return
+  refreshTimer = window.setTimeout(() => {
+    refreshTimer = null
+    window.location.reload()
+  }, 300)
+}
+
 function buildWsUrl() {
   return `wss://ws.flowbyte.me`
+}
+
+function buildAlertApiUrl() {
+  const ws = buildWsUrl()
+  if (ws.startsWith('wss://')) return ws.replace('wss://', 'https://') + '/alerts/recent'
+  if (ws.startsWith('ws://')) return ws.replace('ws://', 'http://') + '/alerts/recent'
+  return ''
 }
 
 
@@ -406,6 +487,12 @@ h1 {
   color: var(--vp-c-text-2);
 }
 
+.hero-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .connection {
   display: inline-flex;
   align-items: center;
@@ -430,6 +517,27 @@ h1 {
 }
 .connection.down .dot {
   background: #ef4444;
+}
+
+.tz-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 10px;
+  padding: 6px 8px;
+  font-size: 14px;
+  background: var(--vp-c-bg);
+}
+.tz-select label {
+  color: var(--vp-c-text-2);
+}
+.tz-select select {
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  outline: none;
+  padding: 2px 4px;
 }
 
 .cards {
@@ -546,6 +654,10 @@ h1 {
   .alerts-hero {
     flex-direction: column;
     align-items: flex-start;
+  }
+  .hero-controls {
+    width: 100%;
+    justify-content: space-between;
   }
 }
 </style>
