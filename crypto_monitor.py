@@ -28,6 +28,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Deque, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import websockets
 from websockets.server import WebSocketServerProtocol
@@ -48,9 +49,17 @@ WINDOW_SIZE_MINUTES = 5
 ALERT_THRESHOLDS = [0.01, 0.005]  # 1% and 0.5%
 ALERT_DEDUP_SECONDS = 180
 RETENTION_SECONDS = 24 * 3600
+TIMEZONE_KEYS = {
+    "utc": "UTC",
+    "us_west": "America/Los_Angeles",
+    "us_east": "America/New_York",
+    "beijing": "Asia/Shanghai",
+}
 
 CLIENT_WS_HOST = "127.0.0.1"
 CLIENT_WS_PORT = 8765
+HTTP_HOST = "0.0.0.0"
+HTTP_PORT = 8080
 DB_PATH = "crypto_monitor.db"
 
 
@@ -340,8 +349,12 @@ class MarketMonitor:
         self.windows: Dict[str, Deque[ClosedKline]] = {
             s: deque(maxlen=WINDOW_SIZE_MINUTES) for s in SYMBOLS
         }
-        self.today_open: Dict[str, Optional[float]] = {s: None for s in SYMBOLS}
-        self.today_key: Dict[str, Optional[dt.date]] = {s: None for s in SYMBOLS}
+        self.today_open_by_tz: Dict[str, Dict[str, Optional[float]]] = {
+            tz: {s: None for s in SYMBOLS} for tz in TIMEZONE_KEYS
+        }
+        self.today_key_by_tz: Dict[str, Dict[str, Optional[dt.date]]] = {
+            tz: {s: None for s in SYMBOLS} for tz in TIMEZONE_KEYS
+        }
         self.last_alert_at: Dict[Tuple[str, str, float], float] = {}
         self.last_price: Dict[str, Optional[float]] = {s: None for s in SYMBOLS}
 
@@ -393,10 +406,12 @@ class MarketMonitor:
         await self._publish_price(symbol, price, ts_ms)
 
     def _update_daily_open(self, kline: ClosedKline) -> None:
-        day = utc_date_from_ms(kline.open_time)
-        if self.today_key[kline.symbol] != day:
-            self.today_key[kline.symbol] = day
-            self.today_open[kline.symbol] = kline.open
+        for tz_key, tz_name in TIMEZONE_KEYS.items():
+            tz_info = ZoneInfo(tz_name)
+            day = dt.datetime.fromtimestamp(kline.open_time / 1000, tz_info).date()
+            if self.today_key_by_tz[tz_key][kline.symbol] != day:
+                self.today_key_by_tz[tz_key][kline.symbol] = day
+                self.today_open_by_tz[tz_key][kline.symbol] = kline.open
 
     def _compute_window_stats(self, window: Deque[ClosedKline]) -> Optional[dict]:
         if len(window) < WINDOW_SIZE_MINUTES:
@@ -481,13 +496,19 @@ class MarketMonitor:
 
     async def _publish_price(self, symbol: str, price: float, ts_ms: int) -> None:
         self.last_price[symbol] = price
-        pct = pct_change(self.today_open.get(symbol), price)
+        day_open_map = {
+            tz_key: self.today_open_by_tz[tz_key].get(symbol) for tz_key in TIMEZONE_KEYS
+        }
+        pct_map = {tz_key: pct_change(day_open_map[tz_key], price) for tz_key in TIMEZONE_KEYS}
         payload = {
             "type": "price",
             "symbol": symbol.upper(),
             "price": price,
-            "today_open": self.today_open.get(symbol),
-            "pct_from_today_open": pct,
+            "day_open": day_open_map,
+            "pct_from_day_open": pct_map,
+            # legacy keys for backward compatibility (UTC)
+            "today_open": day_open_map.get("utc"),
+            "pct_from_today_open": pct_map.get("utc"),
             "ts": ts_ms,
         }
         await self.broadcaster.broadcast(payload)
@@ -496,9 +517,16 @@ class MarketMonitor:
         return {
             sym.upper(): {
                 "price": self.last_price.get(sym),
-                "today_open": self.today_open.get(sym),
+                "day_open": {
+                    tz_key: self.today_open_by_tz[tz_key].get(sym) for tz_key in TIMEZONE_KEYS
+                },
+                "pct_from_day_open": {
+                    tz_key: pct_change(self.today_open_by_tz[tz_key].get(sym), self.last_price.get(sym))
+                    for tz_key in TIMEZONE_KEYS
+                },
+                "today_open": self.today_open_by_tz["utc"].get(sym),
                 "pct_from_today_open": pct_change(
-                    self.today_open.get(sym), self.last_price.get(sym)
+                    self.today_open_by_tz["utc"].get(sym), self.last_price.get(sym)
                 ),
             }
             for sym in SYMBOLS
@@ -554,6 +582,62 @@ async def start_client_ws_server(
     await server.wait_closed()
 
 
+async def start_http_server(store: SQLiteStore) -> None:
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            request_line = await reader.readline()
+            if not request_line:
+                writer.close()
+                await writer.wait_closed()
+                return
+            try:
+                method, path, _ = request_line.decode().strip().split(" ", 2)
+            except ValueError:
+                writer.write(b"HTTP/1.1 400 Bad Request\r\n\r\n")
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+                return
+            # consume headers
+            while True:
+                line = await reader.readline()
+                if line in (b"\r\n", b"\n", b""):
+                    break
+            if method != "GET":
+                writer.write(b"HTTP/1.1 405 Method Not Allowed\r\n\r\n")
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+                return
+            if path.startswith("/alerts/recent"):
+                alerts = await store.fetch_recent_alerts(limit=10)
+                body = json.dumps({"alerts": alerts}, separators=(",", ":")).encode()
+                headers = (
+                    "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: application/json\r\n"
+                    f"Content-Length: {len(body)}\r\n"
+                    "Access-Control-Allow-Origin: *\r\n"
+                    "\r\n"
+                )
+                writer.write(headers.encode() + body)
+            else:
+                writer.write(b"HTTP/1.1 404 Not Found\r\n\r\n")
+            await writer.drain()
+        except Exception:
+            logging.exception("HTTP handler error")
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+    server = await asyncio.start_server(handle, HTTP_HOST, HTTP_PORT)
+    logging.info("HTTP server listening on http://%s:%s", HTTP_HOST, HTTP_PORT)
+    async with server:
+        await server.serve_forever()
+
+
 async def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -569,6 +653,7 @@ async def main() -> None:
         binance_listener(monitor),
         retention_worker(store),
         start_client_ws_server(monitor, broadcaster),
+        start_http_server(store),
     )
 
 
