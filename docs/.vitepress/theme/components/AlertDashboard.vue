@@ -63,23 +63,6 @@
         </div>
       </div>
     </section>
-    <Transition name="fade">
-      <div v-if="showWelcomeModal" class="modal-backdrop">
-        <div class="modal-content">
-          <div class="modal-icon">🔔</div>
-          <h2>开启实时监控</h2>
-          <p>
-            为了确保您不会错过任何行情波动，本页面需要启用<strong>音频播放</strong>与<strong>系统通知</strong>权限。
-          </p>
-          <div class="modal-example">
-            <span>⚠️ 将在检测到异常波动时发出警报</span>
-          </div>
-          <button class="btn-primary" @click="enableAndEnter">
-            开启警报并进入
-          </button>
-        </div>
-      </div>
-    </Transition>
   </div>
 </template>
 
@@ -134,14 +117,14 @@ symbols.forEach((sym) => {
 const connectionLabel = computedLabel()
 const connectionClass = computedClass()
 const currentTzLabel = computed(() => tzOptionMap[selectedTz.value]?.label ?? 'UTC+0')
-const showWelcomeModal = ref(true)
+
 onMounted(async () => {
   await loadEcharts()
   initCharts()
   fetchInitialAlerts()
   connect()
+  playAlertSound()
 })
-
 
 onBeforeUnmount(() => {
   cleanupWs()
@@ -243,60 +226,32 @@ function scheduleReconnect() {
 
 // handle sound alert 
 let audio: HTMLAudioElement | null = null;
-async function enableAndEnter() {
-  showWelcomeModal.value = false
-  playAlertSound()
-  await requestAndShowTestNotification()
-}
-async function requestAndShowTestNotification() {
-  if (!("Notification" in window)) return
 
-  let permission = Notification.permission
-  if (permission !== "granted") {
-    permission = await Notification.requestPermission()
-  }
-
-  // 如果获得权限，发送一条测试通知
-  if (permission === "granted") {
-    new Notification("系统就绪", {
-      body: "您的浏览器通知与音频警报已开启。",
-      icon: "https://cryptologos.cc/logos/bitcoin-btc-logo.png" 
-    })
-  }
-}
 // 在 onMounted 中初始化（或在第一次播放时初始化）
 function playAlertSound() {
   if (!audio) {
     audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
   }
-  audio.currentTime = 0; 
   audio.play().catch(e => {
-    console.warn('音频播放失败 (可能是因为用户尚未与页面交互)', e);
+    console.warn('音频播放被浏览器拦截，请先点击页面任意位置以激活音频权限。', e);
   });
 }
 
+// 浏览器原生弹窗通知 (Notification API)
 async function showNativeNotification(msg: any) {
-  // 如果浏览器不支持或用户未授权，直接返回
   if (!("Notification" in window)) return;
-  if (Notification.permission !== "granted") return;
 
-  // 格式化数据用于显示
-  const symbol = msg.symbol;
-  const typeText = badge(msg.alert_type); 
-  const change = moveFromAnchor(msg);
-  const price = formatPrice(triggerPrice(msg));
-
-  // 构建通知内容
-  const title = `🚨 ${symbol} ${typeText}`;
-  const body = `现价: ${price}\n波动: ${pctOrDash(change)} (阈值 ${(msg.magnitude * 100).toFixed(1)}%)`;
-
-  // 发送通知
-  new Notification(title, {
-    body: body,
-    icon: '/logo.png', 
-    tag: msg.id,
-    requireInteraction: true
-  });
+  if (Notification.permission === "granted") {
+    new Notification(`币预警: ${msg.symbol}`, {
+      body: `${badge(msg.alert_type)}: 变动 ${moveFromAnchor(msg)}`,
+      icon: '/logo.png' // 如果你有 logo 的话
+    });
+  } else if (Notification.permission !== "denied") {
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") {
+      showNativeNotification(msg);
+    }
+  }
 }
 
 function handleMessage(msg: any) {
@@ -319,12 +274,13 @@ function handleMessage(msg: any) {
   } else if (msg.type === 'alert') {
     const id = `${msg.symbol}-${msg.alert_type}-${msg.ts}-${msg.magnitude}`
     if (alerts.find((a) => a.id === id)) return
-    const newAlert = { ...msg, id }
-    alerts.unshift(newAlert)
+    alerts.unshift({
+      ...msg,
+      id
+    })
     if (alerts.length > 50) alerts.pop()
     // scheduleRefreshOnAlert()
-    playAlertSound()
-    showNativeNotification(newAlert)
+    // fetchInitialAlerts()
   }
 }
 
@@ -352,7 +308,14 @@ function hydrateAlerts(list: any[]) {
 }
 
 function setDayOpens(sym: string, dayOpenMap: Record<string, number> | undefined, legacyOpen: number | null) {
-  const map = dayOpenMap || { utc: legacyOpen }
+  const fallback = legacyOpen ?? null
+  const map = { ...(dayOpenMap ?? {}) }
+  // ensure all supported timezones get a value (fallback to legacy UTC open if missing)
+  tzOptions.forEach(({ key }) => {
+    if (map[key] === undefined || map[key] === null) {
+      map[key] = fallback
+    }
+  })
   Object.entries(map).forEach(([tz, v]) => {
     if (!dayOpens[tz]) {
       dayOpens[tz] = { BTCUSDT: null, ETHUSDT: null }
@@ -449,7 +412,10 @@ function fmtTs(ts: number) {
 function formatWithTz(ts: number, opts: Intl.DateTimeFormatOptions) {
   const tzKey = selectedTz.value
   const tz = tzOptionMap[tzKey]?.timeZone || 'UTC'
-  return new Intl.DateTimeFormat('en-US', {
+  const locale =
+    tzKey === 'beijing' ? 'zh-CN' : tzKey === 'us_west' || tzKey === 'us_east' ? 'en-US' : 'en-GB'
+
+  return new Intl.DateTimeFormat(locale, {
     timeZone: tz,
     ...opts,
     hour12: false
@@ -472,12 +438,7 @@ function pctOrDash(v: number | null | undefined) {
 }
 
 function anchorPrice(a: any) {
-  const anchor = a?.reference?.anchor_price
-  if (anchor !== undefined && anchor !== null) return anchor
-  if (a?.alert_type === 'rapid_rebound') {
-    return a?.reference?.low ?? null
-  }
-  return a?.reference?.peak_price ?? a?.reference?.high ?? null
+  return a?.reference?.anchor_price ?? a?.reference?.peak_price ?? a?.reference?.high ?? null
 }
 
 function anchorTs(a: any) {
@@ -516,24 +477,8 @@ function moveFromAnchor(a: any) {
   if (a?.reference?.move_from_anchor !== undefined && a?.reference?.move_from_anchor !== null) {
     return a.reference.move_from_anchor
   }
-  if (a?.alert_type === 'rapid_drop') {
-    const drop = a?.reference?.drop_from_peak
-    if (drop !== undefined && drop !== null) return drop
-    const open = a?.reference?.open
-    const anchor = anchorPrice(a)
-    const current = triggerPrice(a)
-    if (open === null || open === undefined || open === 0 || anchor === null || current === null) return null
-    return (anchor - current) / open
-  }
-  if (a?.alert_type === 'rapid_rebound') {
-    const rise = a?.reference?.rise_from_trough
-    if (rise !== undefined && rise !== null) return rise
-    const open = a?.reference?.open
-    const anchor = anchorPrice(a)
-    const current = triggerPrice(a)
-    if (open === null || open === undefined || open === 0 || anchor === null || current === null) return null
-    return (current - anchor) / open
-  }
+  if (a?.alert_type === 'rapid_drop') return a?.reference?.drop_from_peak ?? null
+  if (a?.alert_type === 'rapid_rebound') return a?.reference?.rise_from_trough ?? null
   return null
 }
 
@@ -791,111 +736,5 @@ h1 {
     width: 100%;
     justify-content: space-between;
   }
-}
-
-/* --- 弹窗样式 --- */
-.modal-backdrop {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(8px); /* 背景磨砂模糊 */
-  z-index: 9999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.modal-content {
-  background: var(--vp-c-bg); /* 使用现有变量，或改为 #1e1e20 */
-  border: 1px solid var(--vp-c-divider);
-  padding: 32px;
-  border-radius: 24px;
-  width: 90%;
-  max-width: 400px;
-  text-align: center;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.modal-icon {
-  font-size: 48px;
-  margin-bottom: 16px;
-  background: var(--vp-c-bg-soft);
-  width: 80px;
-  height: 80px;
-  line-height: 80px;
-  border-radius: 50%;
-  border: 1px solid var(--vp-c-divider);
-}
-
-.modal-content h2 {
-  font-size: 24px;
-  font-weight: 700;
-  margin: 0 0 12px;
-  background: linear-gradient(120deg, #16c784, #00b2ff);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.modal-content p {
-  color: var(--vp-c-text-2);
-  font-size: 15px;
-  line-height: 1.6;
-  margin-bottom: 24px;
-}
-
-.modal-example {
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  color: #ef4444;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 24px;
-}
-
-.btn-primary {
-  background: linear-gradient(90deg, #16c784, #0caadc);
-  color: white;
-  border: none;
-  padding: 12px 32px;
-  font-size: 16px;
-  font-weight: 600;
-  border-radius: 99px;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 4px 12px rgba(22, 199, 132, 0.3);
-}
-
-.btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(22, 199, 132, 0.4);
-}
-
-.btn-primary:active {
-  transform: translateY(0);
-}
-
-/* 动画效果 */
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(20px) scale(0.95); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
 }
 </style>
