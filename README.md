@@ -1,9 +1,11 @@
 # 群组消息实时总结
 
-> 让群聊里的高价值信息不再被刷屏淹没。  
-> 1 分钟追上讨论进度，快速定位共识、分歧与下一步行动 🚀
+> 让群聊里的高价值信息不再被刷屏淹没。
+> 1 分钟追上讨论进度，快速定位共识、分歧与下一步行动 🚀。
+> 比特币波动在线预警，**声音**提示，提醒你及时操作
 
-🔗 **线上站点（实时更新）**  
+🔗 **线上站点（实时更新）**
+
 👉 https://stock.autoin.me/
 
 ## ⏱ 更新规律
@@ -15,6 +17,53 @@
 - **收盘后**：**立刻**总结过去 **24 小时** 的消息记录  
 
 （如果你希望调整策略或频率，欢迎提 issue 讨论）
+
+## 本地部署
+
+### 定时总结
+
+1. 设置local_secrets,其中包含了whop请求的header和访问模型的api密钥
+
+   1. 在utils文件夹下新建local_secrets.py
+   2. 在whop网页中打开开发者模式，在**网络**中找到``https://whop.com/api/graphql/MessagesFetchFeedPosts/`` 请求，复制该请求附带的headers，可以让gpt写成字典形式，以如下格式放到local_secrets.py中
+
+   ```python
+   whom_headers = {
+      'baggage': '',
+      'dpr': '',
+      'priority': '',
+      'sentry-trace': '',
+      'x-deployment-id': '',
+      'x-whop-force-new-permission-system': '',
+      'Cookie': '',
+      'content-type': 'application/json'
+   }
+   ```
+
+   3. 再设置api密钥，支持google和openai格式的请求，在local_secrets.py中按照如下格式填写
+
+   ```python
+      model_key = [
+        {
+           'model': "Pro/deepseek-ai/DeepSeek-V3.2", #使用的模型，这里是deepseek
+           "key": "密钥",
+           "base_url": "https://api.siliconflow.cn/v1", # 如果使用了转发，需要填写baseurl，这里是硅基流动
+           "app": "openai" # 使用openai库进行访问
+        },
+        {
+           'model': "gemini-2.5-pro", #使用的模型
+           'key': "google 密钥",
+           'app': "google" # 使用google库进行访问
+        },
+      ]
+   ```
+
+2. 设置程序，每1小时运行仓库中的脚本``sh/run.sh``
+3. 运行whop_summary.py即可进行总结
+
+### btc预警
+
+1. 运行crypto_monitor.py即可
 
 ## ✨ 这是什么？
 
@@ -74,6 +123,8 @@
 
 接下来可能会做的方向：
 
+- xiaozhaoluck的操作思路总结
+- 股票点位单独放到一个栏目中，可以更加方便的对比
 - 更精准的主题聚类与热点追踪  
 - 优化展现形式  
 - 针对不同内容分开总结
