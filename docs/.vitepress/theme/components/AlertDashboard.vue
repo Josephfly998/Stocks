@@ -151,6 +151,8 @@ const chartEls = new Map<string, HTMLElement>()
 let ws: WebSocket | null = null
 let echartsLib: any = null
 const connectionState = ref<'connecting' | 'open' | 'closed'>('connecting')
+let alertAudio: HTMLAudioElement | null = null
+const ALERT_AUDIO_URL = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3'
 
 const connectionLabel = computed(() => connectionState.value === 'open' ? '实时连接' : '连接中...')
 const connectionClass = computed(() => ({ live: connectionState.value === 'open', down: connectionState.value === 'closed' }))
@@ -180,6 +182,8 @@ onMounted(async () => {
   })
   fetchInitialAlerts()
   connect()
+  initAlertAudio()
+  playAlertSound()
 })
 
 async function loadEcharts() {
@@ -217,6 +221,7 @@ function handleMessage(msg: any) {
     if (!alerts.find(a => a.id === id)) {
       alerts.unshift({ ...msg, id })
       if (alerts.length > 50) alerts.pop()
+      playAlertSound()
     }
   }
 }
@@ -399,7 +404,10 @@ function resolveAlertsUrl() {
 
 function connect() {
   ws = new WebSocket(resolveWsUrl())
-  ws.onopen = () => connectionState.value = 'open'
+  ws.onopen = () => {
+    connectionState.value = 'open'
+    playAlertSound()
+  }
   ws.onmessage = (e) => handleMessage(JSON.parse(e.data))
   ws.onclose = () => { connectionState.value = 'closed'; setTimeout(connect, 3000) }
 }
@@ -410,6 +418,22 @@ async function fetchInitialAlerts() {
     const data = await res.json()
     if (data.alerts) alerts.splice(0, alerts.length, ...data.alerts.map((a: any) => ({ ...a, id: `${a.symbol}-${a.ts}` })))
   } catch (e) {}
+}
+
+function initAlertAudio() {
+  if (alertAudio) return
+  alertAudio = new Audio(ALERT_AUDIO_URL)
+  alertAudio.preload = 'auto'
+  alertAudio.load()
+}
+
+function playAlertSound() {
+  initAlertAudio()
+  if (!alertAudio) return
+  alertAudio.currentTime = 0
+  alertAudio.play().catch(() => {
+    // Autoplay may be blocked until user interaction.
+  })
 }
 
 onBeforeUnmount(() => { ws?.close(); charts.forEach(c => c.dispose()) })
