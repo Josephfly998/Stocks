@@ -32,18 +32,13 @@ def get_reply_target(post: Dict[str, Any]) -> Optional[str]:
 
     # 先尝试用户名
     user = replying.get("user")
+    content = replying.get("content", "").strip()
+    content = content[:25] + "..."
     if isinstance(user, dict):
         name = user.get("name") or user.get("username")
         if name:
-            return name
-
-    # 再退回到内容（这里简单截断下，避免太长）
-    content = replying.get("content")
-    if content:
-        content = content.strip()
-        max_len = 20  # 你可以按需要调整
-        return content if len(content) <= max_len else content[:max_len] + "..."
-    return None
+            return name, content
+    return None, content
 
 
 def history_list_to_text(items: List[Dict[str, Any]], username_dict: Dict[str, str]) -> str:
@@ -71,9 +66,9 @@ def history_list_to_text(items: List[Dict[str, Any]], username_dict: Dict[str, s
         name = get_user_name(post, username_dict)
 
         # 回复对象
-        reply_target = get_reply_target(post)
+        reply_target, content_preview = get_reply_target(post)
         if reply_target:
-            reply_part = f"(回复{reply_target})"
+            reply_part = f"(回复{reply_target}之前的发言: {content_preview})"
         else:
             reply_part = ""
 
@@ -81,8 +76,8 @@ def history_list_to_text(items: List[Dict[str, Any]], username_dict: Dict[str, s
         content = (post.get("content") or "").strip()
 
         # 最终一行
-        # 示例：2025-11-26 12:34:56 [管理员]阿佳 说(回复赵哥): 下周大
-        line = f"{time_str} {admin_tag}{name} 说{reply_part}: {content}"
+        # 示例：2025-11-26 12:34:56 [管理员]阿佳 (回复赵哥之前的发言: 内容预览)说: 下周大
+        line = f"{time_str} {admin_tag}{name} {reply_part}说: {content}"
         lines.append(line)
 
     # 用换行拼起来
