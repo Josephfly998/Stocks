@@ -18,8 +18,6 @@ def summary_run():
     to_summary_text = summary_prompt + big_text
     # model = "gemini-2.5-pro"
     model = "gemini-3-flash-preview"
-    # model = "Qwen/Qwen3-VL-32B-Instruct"
-    # model = "gemini-3-pro-preview"
     # model = "Pro/deepseek-ai/DeepSeek-V3.2"
     summary = get_response(to_summary_text, model=model)
 

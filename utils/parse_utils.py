@@ -1,6 +1,6 @@
 
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 def format_timestamp(ts_ms: str | int) -> str:
     """
@@ -21,19 +21,20 @@ def get_user_name(post: Dict[str, Any], username_dict: Dict[str, str]) -> str:
     return username_dict.get(post.get("userId"), "未知用户")
 
 
-def get_reply_target(post: Dict[str, Any]) -> Optional[str]:
+def get_reply_target(post: Dict[str, Any]) -> Tuple[Optional[str], str]:
     """
     从 replyingToPost 里取一个“回复对象”的描述。
     优先用原帖用户名字，其次内容（可按需截断）。
     """
     replying = post.get("replyingToPost")
     if not replying:
-        return None
+        return None, ""
 
     # 先尝试用户名
     user = replying.get("user")
-    content = replying.get("content", "").strip()
-    content = content[:25] + "..."
+    content = replying.get("content") or ""
+    contetn = content.strip()
+    content = content[:25] + "..." if len(content) > 25 else content
     if isinstance(user, dict):
         name = user.get("name") or user.get("username")
         if name:
